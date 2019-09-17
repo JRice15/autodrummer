@@ -8,211 +8,138 @@ import soundfile as sf
 import re
 import math
 
+from os.path import dirname
+musicdir = dirname(dirname(os.path.abspath(__file__)))
+sys.path.append(musicdir + '/relativism')
 
-RATE = 44100
+from recording_obj import Recording
+from sampler import *
+from input_processing import *
+from output_and_prompting import *
 
 
-def main():
+
+class Analysis():
+
+    def __init__(self, rec=None):
+        if rec is None:
+            rec = Recording(parent=self)
+        self.rec = rec
+        self.arr = rec.arr
+        self.mono_arr = [(i + j) / 2 for i, j in rec.arr]
+        self.rate = rec.rate
+        self.samp_len = rec.size_samps()
+        self.average_amplitude = average(self.mono_arr)
+
+        # frame variables
+        self.frame_length = int(self.rate * 1/20) # 20th of second fractions
+        self.frame_step = int(self.rate * 1/100) # 441. Iterated at 100ths of seconds
+
+
+    def maybe_playback(self):
+        p("Playback before analyzing? [y/n]")
+        playback_yn = inpt()
+        if playback_yn:
+            self.rec.playback()
+
+
+    def get_frames(self):
+        """
+        take and average data from recording into frames
+        """
+        info_block("Calculating frames")
+
+        frames = [] # start index, avg amplitude
+        for i in range(0, self.samp_len - self.frame_length, self.frame_step): 
+            frame = self.mono_arr[ i : i + self.frame_length]
+            frame = numpy.take(frame, range(len(frame)))
+            frame_avg = average([abs(j) for j in frame])
+            if frame_avg > self.average_amplitude:
+                frames.append( (i, frame_avg) )
+
+        return frames # (start index, avg amplitude)
+
+
+    def find_peaks(self, frames):
+        """
+        get highest non-overlapping peaks within a given 20th of a second
+        """
+        info_block("Finding peaks")
+
+        frames = [i for i in frames if i[1] > self.average_amplitude]
+        sorted_frames = super_sort(frames, ind=1, high_to_low=True)
+        
+        print(sorted_frames[:20])
+
+        i = 0
+        while i < len(sorted_frames):
+            del_ind = i + 1
+            frame_ind = sorted_frames[i][0]
+            while del_ind < len(sorted_frames):
+                # if a smaller frame overlaps, delete it
+                if (
+                    sorted_frames[del_ind][0] - self.frame_length 
+                    < frame_ind
+                    < sorted_frames[del_ind][0] + self.frame_length
+                ):
+                    del sorted_frames[del_ind]
+                else:
+                    del_ind += 1
+            i += 1
+
+        in_order = super_sort(frames, ind=0)   
+        for i in range(len(in_order) - 1):
+            print(in_order[i + 1][0] - in_order[i][0])
+
+
+
+class AutoDrummer(Analysis):
+
+    def __init__(self, rec):
+        super().__init__(rec)
+        self.frames = self.get_frames()
+        self.find_peaks(self.frames)
+
+
+
+
+
+
+
+def average(the_list):
     """
-    real thalamus hours
+    average items of a list
     """
-
-    global RATE
-    FRACTION = 1/20  # 0.05
-
-    mode, record_time, filename, playback_yn, device_ind = command_line_init()
-
-    # also covers playback
-    recording = init_and_process(mode, record_time, filename, playback_yn, device_ind)
-
-    peaks = find_peaks(recording, RATE, FRACTION, record_time)
+    return sum(the_list) / len(the_list)
 
 
-
-def command_line_init():
+def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
     """
-    analyze command line for initialization flags
+    list, index1, index2, reverse.
+    sorted by list[ind1][ind2] keys, for given indexs
     """
-    mode = None
-    record_time = None
-    filename = None
-    playback_yn = None
-    device_ind = None
-
-    for i in sys.argv[1:]:
-        if re.fullmatch(r"^mode=.+", i) or re.fullmatch(r"^m=.+", i):
-            mode = re.sub(r".+=", "", i)
-        elif re.fullmatch(r"^duration=.+", i) or re.fullmatch(r"^d=.+", i):
-            record_time = int(re.sub(r".+=", "", i))
-        elif re.fullmatch(r"^filename=.+", i) or re.fullmatch(r"^f=.+", i):
-            filename = re.sub(r".+=", "", i)
-        elif re.fullmatch(r"^playback=.+", i) or re.fullmatch(r"^p=.+", i):
-            playback_yn = re.sub(r".+=", "", i)
-        elif re.fullmatch(r"^device=.+", i) or re.fullmatch(r"^d=.+", i):
-            device_ind = int(re.sub(r".+=", "", i))
-        else:
-            print("Unrecognized command line flag: '" + i +"'. Ignoring...")
-
-    return mode, record_time, filename, playback_yn, device_ind
-
-
-def init_and_process(mode, record_time, filename, playback_yn, device_ind):
-    """
-    fill in initialization via input
-    get recording by mode
-    call get_help/playback if asked
-    """
-
-    valid_modes = ("live record (r)", "read .wav file (f)", "help (h)")
-    if mode == None:
-        print("\nAvailable modes:")
-        for i in valid_modes: print("* {0}".format(i))
-        print("Select mode: ", end="")
-        mode = input()
-
-    # Record Mode
-    if mode.lower() in ("r", "rec", "record", "live", "live record", "(r)"):
-        print("\n* Record mode\n")
-        if device_ind == None:
-            print("{0} devices found".format(len(sd.query_devices())))
-            print("Devices by index:")
-            print(sd.query_devices())
-            print("\nEnter desired recording device index: ", end="")
-            device_ind = int(input())
-        if record_time == None:
-            print("\nSelect recording duration (seconds): ", end="")
-            record_time = int(input())
-        device_name = sd.query_devices()[device_ind]['name']
-        recording = record_live(RATE, device_ind, device_name, record_time)
-
-    # File Mode
-    elif mode.lower() in ("f", "file", "read", ".wav file", "wav", "wav file",\
-            "read .wav file", "(f)"):
-        print("\n* File mode\n")
-        recording = None
-        while type(recording) != numpy.ndarray:
-            if filename == None:
-                print("Enter file full name: ", end="")
-                filename = input()
-            recording = read_file(filename)
-            if type(recording) != numpy.ndarray:
-                print("\nFile '{0}' unable to be read".format(filename))
-                filename = None
-                print("Please select a '.wav' file")
-        record_time = int(len(recording) / RATE)
-
-    # Help
-    elif mode.lower() in ("h", "help", "(h)"):
-        get_help()
-
-    # Unknown mode
-    else:
-        print("\nInvalid mode '{0}'. Valid modes are:".format(mode))
-        for i in valid_modes: print("* {0}".format(i))
-        print("\nExiting...\n")
-        sys.exit()
-
-    return recording
-
-
-def record_live(RATE, device_ind, device_name, record_time):
-    """
-    record -- but get this -- Live!
-    """
-
-    print("\nRecord? [y/n]: ", end="")
-    cont = input()
-    if cont not in ("Y", "y", "yes", "Yes"):
-        print("\nExiting...\n")
-        sys.exit()
-    time.sleep(0.4)
-    print("* Recording at input {0} ({1}) for {2} seconds".format(device_ind, \
-        device_name, record_time))
-    recording = sd.rec(int(record_time * RATE), RATE, device=device_name)
-    sd.wait()
-    print("Finished recording")
-    return recording
-
-
-def read_file(filename):
-    global RATE
-    try:
-        recording, RATE = sf.read(filename)
-        print("Sound file '{0}' read successfully".format(filename))
-        return recording
-    except RuntimeError:
-        return None
-
-
-def playback(recording, playback_yn):
-    if playback_yn == None:
-        print("\nPlayback before analyzing? [y/n]: ", end="")
-        playback_yn = input()
-    if playback_yn in ("Y", "y", "yes", "Yes"):
-        time.sleep(0.5)
-        print("\n* Playback")
-        sd.play(recording, RATE)
-        sd.wait()
-        print("Finished playback")
-
-
-def find_peaks(recording, RATE, FRACTION, record_time):
-    """
-    * Calculate peaks in waveform
-    * Returns _____
-    """
-    frames_frac = int(RATE * FRACTION) # 20th of second fractions
-    iter_frames = int(frames_frac / 5) # 441. Iterated at 100ths of seconds
-
-
-    """ take and average data from recording into snippets """
-    snippet_averages = [] # start frame, avg amplitude
-    for i in range(0, len(recording) - frames_frac, iter_frames): 
-        snippet = recording[i:i + frames_frac]
-        snippet = numpy.take(snippet, range(len(snippet)))
-        snippet = [abs(j) for j in snippet]
-        snippet_averages.append([i, sum(snippet) / len(snippet)])
-
-
-    """ get highest non-overlapping peaks within a given 20th of a second"""
-    snippet_averages = sort(snippet_averages, 1, None, True)
-    
-    ref_ind = 0
-    while ref_ind < len(snippet_averages):
-        del_ind = ref_ind + 1
-        ref_ind_frame = snippet_averages[ref_ind][0]
-        while del_ind < len(snippet_averages):
-            if snippet_averages[del_ind][0] - (5 * iter_frames) < ref_ind_frame < snippet_averages[del_ind][0] + (5 * iter_frames):
-                del snippet_averages[del_ind]
-            else:
-                del_ind += 1
-        ref_ind += 1
-
-    print(snippet_averages[:30])
-
-
-
-
-
-
-
-
-
-
-
-
-
-def sort(the_list, ind, ind2, rev):
     if ind != None:
         if ind2 != None:
-            return sorted(the_list, key=lambda i: i[ind][ind2], reverse=rev)
-        return sorted(the_list, key=lambda i: i[ind], reverse=rev)
-    else:
-        return sorted(the_list, reverse=rev)
+            return sorted(the_list, key=lambda i: i[ind][ind2], reverse=high_to_low)
+        return sorted(the_list, key=lambda i: i[ind], reverse=high_to_low)
+    return sorted(the_list, reverse=high_to_low)
 
 
 
-def get_help():
+
+def autodrummer_main():
+    a = Recording(source='/Users/user1/Desktop/CS/music/relativism/t.wav', name='test')
+    AutoDrummer(a)
+
+
+
+
+
+
+
+
+
+def autodrummer_help():
     print("\n*** AutoDrummer Help ***\n")
     print("Usage:\n")
     print("  Standard/Manual Entry: 'python3 autodrummer.py', then follow instructions\n")
@@ -234,6 +161,6 @@ def get_help():
 
 if __name__ == "__main__":
     if ("-h" in sys.argv) or ("-H" in sys.argv) or ("--help" in sys.argv) or ("help" in sys.argv):
-        get_help()
+        autodrummer_help()
     else:
-        main()
+        autodrummer_main()

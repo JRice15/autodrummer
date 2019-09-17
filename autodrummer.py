@@ -13,63 +13,60 @@ RATE = 44100
 
 def main():
 
-    #try:
         
-        # Initialization
-        sd.default.channels = 2
+    # Initialization
+    sd.default.channels = 2
 
-        print("\n*** Welcome to AutoDrummer ***\n")
-        
-        mode, record_time, filename, playback_yn, device_ind = initialize()
-
-        # Modes
-        recording, mode, record_time, filename, playback_yn, device_ind = \
-            process_mode(mode, record_time, filename, playback_yn, device_ind)
-
-        #Playback
-        playback(recording, playback_yn)
-
-        start_time = time.time()
-
-        # Average Fractions
-        pos_diffs, total_avg = averages(recording, RATE, record_time)
-        
-        # Find Possible Beats
-        poss_beats = possible_beats(pos_diffs, record_time, total_avg)
-
-        # Find Lengths of Beats
-        beat_lens = beat_lengths(poss_beats)
-
-        # Find lengths of most likely beats
-        tempos = analyze_tempo(beat_lens)
-
-        # Find Pattern of Beat Lens
-        pattern = find_pattern(beat_lens, tempos)
-        pattern = pattern[4:]
-
-        # find measure length from the pattern
-        best_measure_model = group_rhythms(pattern, tempos)
-        measure_len = best_measure_model[0]
-
-        # get type of beats from measure len
-        beat_approxs = type_beats(tempos, measure_len)
-
-        # get final pattern model
-        model, rhythm_fracs = create_pattern(best_measure_model, beat_approxs, pattern)
-
-        # get end pattern
-        end_model = end_pattern(best_measure_model, beat_lens)
-
-        # Playback tempo
-        play_tempo_basic(model, measure_len, start_time)
-
-        end_time = time.time()
-        total_time = end_time - start_time
-        print("\nRuntime: {0} seconds".format(total_time))
-        print("*** Complete ***\n")
+    print("\n*** Welcome to AutoDrummer ***\n")
     
-    #except:
-        #print("error")
+    mode, record_time, filename, playback_yn, device_ind = initialize()
+
+    # Modes
+    recording, mode, record_time, filename, playback_yn, device_ind = \
+        process_mode(mode, record_time, filename, playback_yn, device_ind)
+
+    #Playback
+    playback(recording, playback_yn)
+
+    start_time = time.time()
+
+    # Average Fractions
+    pos_diffs, total_avg = averages(recording, RATE, record_time)
+    
+    # Find Possible Beats
+    poss_beats = possible_beats(pos_diffs, record_time, total_avg)
+
+    # Find Lengths of Beats
+    beat_lens = beat_lengths(poss_beats)
+
+    # Find lengths of most likely beats
+    tempos = analyze_tempo(beat_lens)
+
+    # Find Pattern of Beat Lens
+    pattern = find_pattern(beat_lens, tempos)
+    pattern = pattern[4:]
+
+    # find measure length from the pattern
+    best_measure_model = group_rhythms(pattern, tempos)
+    measure_len = best_measure_model[0]
+
+    # get type of beats from measure len
+    beat_approxs = type_beats(tempos, measure_len)
+
+    # get final pattern model
+    model, rhythm_fracs = create_pattern(best_measure_model, beat_approxs, pattern)
+
+    # get end pattern
+    end_model = end_pattern(best_measure_model, beat_lens)
+
+    # Playback tempo
+    play_tempo_basic(model, measure_len, start_time)
+
+    end_time = time.time()
+    total_time = end_time - start_time
+    print("\nRuntime: {0} seconds".format(total_time))
+    print("*** Complete ***\n")
+    
 
 
 def initialize():
@@ -88,7 +85,7 @@ def initialize():
             filename = re.sub(r".+=", "", i)
         elif re.fullmatch(r"^playback=.+", i) or re.fullmatch(r"^p=.+", i):
             playback_yn = re.sub(r".+=", "", i)
-        elif re.fullmatch(r"^device=.+", i) or re.fullmatch(r"^d=.+", i):
+        elif re.fullmatch(r"^index=.+", i) or re.fullmatch(r"^i=.+", i):
             device_ind = int(re.sub(r".+=", "", i))
         else:
             print("Unrecognized command line flag: '" + i +"'. Ignoring...")
@@ -198,7 +195,7 @@ def averages(recording, RATE, record_time):
         snippet = recording[low:high]
         values = numpy.take(snippet, range(len(snippet)))
         abs_vals = [abs(i) for i in values]
-        avg = sum(abs_vals)/len(abs_vals)
+        avg = sum(abs_vals) / len(abs_vals)
         list_avgs.append(avg)
         # print("\nplaying snippet", count)
         # sd.play(recording[low:high])
@@ -323,7 +320,7 @@ def find_pattern(beat_lens, tempos):
     return rhythms
 
 
-def group_rhythms(rhythms, weighted):
+def group_rhythms(rhythms, weighted, strictness=5):
     poss_measure_lens = []
     weightedt = [i for i in weighted]
     weightedt.insert(0, 0) # find all combos of adding up-to 5 tempos together
@@ -355,11 +352,11 @@ def group_rhythms(rhythms, weighted):
                     temp_len_fracs = 0
                 else:
                     temp_len_fracs += weighted[rhythms[j]]
-                if (i - 5 <= temp_len_fracs <= i + 5):
+                if (i - strictness <= temp_len_fracs <= i + strictness):
                     temp_len_measures[0] += 1
                     temp_len_measures.append(abs(i - temp_len_fracs))
                     temp_len_fracs = 0
-                elif (temp_len_fracs > i + 5):
+                elif (temp_len_fracs > i + strictness):
                     if temp_longest[0] < temp_len_measures[0]:
                         temp_longest = temp_len_measures
                     temp_len_measures[0] = 0
@@ -382,7 +379,10 @@ def group_rhythms(rhythms, weighted):
     print("weighted model:", weighted_model[:10], "...", weighted_model[-10:]) # tempo, len, ind, precision
     sort_models = selection_sort(weighted_model, len(weighted_model), 3)
     print(sort_models)
-    best_model = sort_models[-1]
+    try:
+        best_model = sort_models[-1]
+    except IndexError:
+        best_model = group_rhythms(rhythms, weighted, strictness+2)
     print("best model:", best_model)
     return best_model
 
@@ -518,7 +518,7 @@ def helper():
     print("        args: full name of sound file to analyze, which cannot contain spaces (only .wav files are accepted)\n")
     print("    recording duration: d= / duration=[arg], only used in record mode")
     print("        args: integer - recording time in seconds\n")
-    print("    device: d= / device=[arg], used only in record mode")
+    print("    device index: i= / index=[arg], used only in record mode")
     print("        args: integer - index of device to record from (run with no flags to get list of devices by index\n")
     print("Notes & Warnings:")
     print("  * AutoDrummer will not work well for selections with tempos below 60 bpm\n")
