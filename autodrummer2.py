@@ -7,89 +7,20 @@ import time
 import soundfile as sf
 import re
 import math
+import os
 
 from os.path import dirname
-musicdir = dirname(dirname(os.path.abspath(__file__)))
-sys.path.append(musicdir + '/relativism')
-
-from recording_obj import Recording
-from sampler import *
-from input_processing import *
-from output_and_prompting import *
+rel_dir = dirname(dirname(os.path.abspath(__file__)))
+sys.path.append(rel_dir)
 
 
-
-class Analysis():
-
-    def __init__(self, rec=None):
-        if rec is None:
-            rec = Recording(parent=self)
-        self.rec = rec
-        self.arr = rec.arr
-        self.mono_arr = [(i + j) / 2 for i, j in rec.arr]
-        self.rate = rec.rate
-        self.samp_len = rec.size_samps()
-        self.average_amplitude = average(self.mono_arr)
-
-        # frame variables
-        self.frame_length = int(self.rate * 1/20) # 20th of second fractions
-        self.frame_step = int(self.rate * 1/100) # 441. Iterated at 100ths of seconds
+from analysis import *
+# from recording_obj import Recording
+# from sampler import *
+# from input_processing import *
+# from output_and_prompting import *
 
 
-    def maybe_playback(self):
-        p("Playback before analyzing? [y/n]")
-        playback_yn = inpt()
-        if playback_yn:
-            self.rec.playback()
-
-
-    def get_frames(self):
-        """
-        take and average data from recording into frames
-        """
-        info_block("Calculating frames")
-
-        frames = [] # start index, avg amplitude
-        for i in range(0, self.samp_len - self.frame_length, self.frame_step): 
-            frame = self.mono_arr[ i : i + self.frame_length]
-            frame = numpy.take(frame, range(len(frame)))
-            frame_avg = average([abs(j) for j in frame])
-            if frame_avg > self.average_amplitude:
-                frames.append( (i, frame_avg) )
-
-        return frames # (start index, avg amplitude)
-
-
-    def find_peaks(self, frames):
-        """
-        get highest non-overlapping peaks within a given 20th of a second
-        """
-        info_block("Finding peaks")
-
-        frames = [i for i in frames if i[1] > self.average_amplitude]
-        sorted_frames = super_sort(frames, ind=1, high_to_low=True)
-        
-        print(sorted_frames[:20])
-
-        i = 0
-        while i < len(sorted_frames):
-            del_ind = i + 1
-            frame_ind = sorted_frames[i][0]
-            while del_ind < len(sorted_frames):
-                # if a smaller frame overlaps, delete it
-                if (
-                    sorted_frames[del_ind][0] - self.frame_length 
-                    < frame_ind
-                    < sorted_frames[del_ind][0] + self.frame_length
-                ):
-                    del sorted_frames[del_ind]
-                else:
-                    del_ind += 1
-            i += 1
-
-        in_order = super_sort(frames, ind=0)   
-        for i in range(len(in_order) - 1):
-            print(in_order[i + 1][0] - in_order[i][0])
 
 
 
@@ -97,6 +28,9 @@ class AutoDrummer(Analysis):
 
     def __init__(self, rec):
         super().__init__(rec)
+
+        self.set_frame_fractions(1/20, 1/100)
+
         self.frames = self.get_frames()
         self.find_peaks(self.frames)
 
@@ -128,7 +62,7 @@ def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
 
 
 def autodrummer_main():
-    a = Recording(source='/Users/user1/Desktop/CS/music/relativism/t.wav', name='test')
+    a = Recording(source='tapping.wav', name='test')
     AutoDrummer(a)
 
 
