@@ -15,10 +15,10 @@ sys.path.append(rel_dir)
 
 
 from analysis import *
-# from recording_obj import Recording
-# from sampler import *
-# from input_processing import *
-# from output_and_prompting import *
+from recording_obj import Recording
+from sampler import *
+from input_processing import *
+from output_and_prompting import *
 
 
 
@@ -31,7 +31,7 @@ class AutoDrummer(Analysis):
 
         self.set_frame_fractions(1/20, 1/100)
 
-        self.frames = self.get_frames()
+        self.frames = self.get_frames_mono()
         self.find_peaks(self.frames)
 
 
@@ -62,7 +62,7 @@ def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
 
 
 def autodrummer_main():
-    a = Recording(source='tapping.wav', name='test')
+    a = Recording(source='../sources/bgintro.mp3', name='test')
     AutoDrummer(a)
 
 
