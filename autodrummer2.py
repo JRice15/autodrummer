@@ -6,12 +6,14 @@ import numpy
 import time
 import soundfile as sf
 import re
+import random as rd
 import math
 import os
 
 from os.path import dirname
-rel_dir = dirname(dirname(os.path.abspath(__file__)))
-sys.path.append(rel_dir)
+global relativism_dir
+relativism_dir = dirname(dirname(os.path.abspath(__file__)))
+sys.path.append(relativism_dir)
 
 
 from analysis import *
@@ -20,7 +22,7 @@ from sampler import *
 from input_processing import *
 from output_and_prompting import *
 
-
+import tensorflow as tf
 
 
 
@@ -32,7 +34,59 @@ class AutoDrummer(Analysis):
         self.set_frame_fractions(1/20, 1/100)
 
         self.frames = self.get_frames_mono()
-        self.find_peaks(self.frames)
+        peaks = self.find_peaks(self.frames)
+
+        # tensor constants
+        self.peaks = tf.convert_to_tensor(
+            self.filter_peaks(peaks),
+            dtype=tf.float32,
+            name="peaks"
+        )
+        self.rate = tf.Constant(self.rate, dtype=tf.float32, name="sample rate")
+
+        # run modelling
+        self.model()
+    
+
+    def read_model(self):
+        pass
+
+
+    def model(self):
+        """
+        run tf model
+        """
+        self.gradient_step = 0.01
+        self.num_models = 10
+        self.passes_per_model = 1000
+
+
+        model = []
+        while True:
+            model.append()
+
+        init = tf.global_variables_initializer()
+        with tf.Session() as sess:
+            sess.run(init)
+        
+            best_model = []
+            for _ in range(self.num_models):
+                result = sess.run()
+
+
+    def get_one_model(self):
+        """
+        get one model using bpm and offset variables
+        """
+        bpm = tf.Variable(tf.random.uniform(60, 120), dtype=tf.float32,  name='bpm')
+        offset_factor = tf.Variable(tf.random.uniform(0, 1), dtype=tf.float32, name="offset factor")
+        offset = offset_factor * self.rate
+        samples_per_beat = 1 / (bpm * 60) * self.rate
+
+        for i in range(-offset, max(self.peaks[:, 0]))
+
+
+    def model_cost(self, model)
 
 
 
@@ -40,11 +94,29 @@ class AutoDrummer(Analysis):
 
 
 
-def average(the_list):
-    """
-    average items of a list
-    """
-    return sum(the_list) / len(the_list)
+class TrainAutodrummer():
+
+
+    def __init__(self):
+        pass
+
+    def get_training_data(self):
+        """
+        read training_data.csv.
+        returns [ [filename, bpm], ... ]
+        """
+        with open(dirname(__file__) + "/training_data.csv", "r") as f:
+            data = [
+                [j.strip() for j in i.split(",")][:2] for i in f.readlines()
+                if i != "\n"
+            ]
+        return data
+
+
+
+
+
+
 
 
 def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
@@ -62,7 +134,7 @@ def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
 
 
 def autodrummer_main():
-    a = Recording(source='../sources/bgintro.mp3', name='test')
+    a = Recording(source=relativism_dir + '/sources/gtr_test_1.wav', name='test')
     AutoDrummer(a)
 
 
