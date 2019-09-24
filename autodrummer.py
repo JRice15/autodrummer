@@ -18,7 +18,6 @@ from output_and_prompting import *
 
 
 
-
 class AutoDrummer(Analysis):
 
     def __init__(self, rec):
@@ -29,9 +28,8 @@ class AutoDrummer(Analysis):
         # get peaks from waveform
         frames = self.get_frames_mono()
         all_peaks = self.find_peaks(frames)
-        # self.plot(all_peaks, plot_type="scatter", title="All Peaks")
+        self.plot(all_peaks, plot_type="scatter", title="All Peaks")
         peaks = self.filter_peaks(all_peaks)
-        # self.plot(self.peaks, plot_type="scatter", title="Filtered Peaks")
         self.peaks = self.format_peaks(peaks)
 
         # run modelling
@@ -42,20 +40,32 @@ class AutoDrummer(Analysis):
         pass
 
 
-    def format_peaks(self, peaks):
-        # sort by magnitude
-        formatted_peaks = np_sort(
-            peaks,
-            column=1
-        )
-        # scale to 0-1 range
-        formatted_peaks = scale(
-            formatted_peaks,
-            low=np.amin(formatted_peaks, 0)[1],
-            high=np.amax(formatted_peaks, 0)[1]
-        )
-        # peaks as (sample_index, scaled slope), sorted by slope
-        return formatted_peaks
+    def format_peaks(self):
+	        # sort by magnitude
+	        formatted_peaks = NpOps.sort(
+	            self.peaks,
+	            column=1
+	        )
+            # make tensor
+	        formatted_peaks = tf.convert_to_tensor(
+	            formatted_peaks,
+	            dtype=tf.float32,
+	            name="peaks"
+	        )
+	        # scale to 0-1 range
+	        formatted_peaks = scale(
+	            formatted_peaks,
+	            low=tf.reduce_min(
+	                formatted_peaks,
+	                axis=0
+	            )[1],
+	            high=tf.reduce_max(
+	                formatted_peaks,
+	                axis=0
+	            )[1]
+	        )
+	        # peaks as (sample_index, scaled slope), sorted by slope
+	        return formatted_peaks
 
 
 
@@ -68,20 +78,46 @@ class AutoDrummer(Analysis):
         self.num_models = 10
         self.passes_per_model = 100
 
+        # tf constants
+        self.trate = tf.cast(
+            self.rate,
+            dtype=tf.float32,
+            name="sample_rate"
+        )
+        self.tpeaks = self.format_peaks()
+        beat_factors = tf.constant( 
+            # [whole, half, quarter]
+            [1.0, 1/2, 1/4],
+            dtype=tf.float32,
+            name="beat_factors"
+        )
+
         # define tf variables
         bpm = tf.Variable(tf.random.uniform([1], 60, 120), dtype=tf.float32,  name='bpm')
         offset_factor = tf.Variable(tf.random.uniform([1], 0, 1), dtype=tf.float32, name="offset_factor")
-        beat_weights = {
-            1:   tf.Variable(tf.random.uniform([1], 0.5, 1), tf.float32, name="beat_weight_b"),
-            1/2: tf.Variable(tf.random.uniform([1], 0.25, 0.75), tf.float32, name="beat_weight_hb"),
-            1/4: tf.Variable(tf.random.uniform([1], 0, 0.5), tf.float32, name="beat_weight_qb"),            
-        }
+        beat_weights = tf.Variable( 
+            # [whole, half, quarter]
+            [
+                tf.random.uniform([1], 0.5, 1),
+                tf.random.uniform([1], 0.25, 0.75),
+                tf.random.uniform([1], 0, 0.5),
+            ],
+            dtype=tf.float32,
+            name="beat_weights"
+        )
 
+        # operations
+        samples_per_beat = tf.math.round((1 / (bpm * 60) * self.rate), name="samples_per_beat")
+        beat_lengths = tf.math.round(beat_factors * samples_per_beat, name="beat_lengths")
+        
+
+        # optimizer
         optimizer = tf.train.GradientDescentOptimizer(
             self.gradient_step,
             name="optimizer"
         )
 
+        # running
         init = tf.global_variables_initializer()
         with tf.Session() as sess:
             file_writer = tf.summary.FileWriter(dirname(os.path.abspath(__file__)) + "/tboard_logs", sess.graph)
@@ -147,13 +183,12 @@ class AutoDrummer(Analysis):
             # difference between sample indexes
             diff = np.abs(match[0][0] - match[0][1])
             # amplitude times difference between scaled peak and beat weight
-            diff *= np.abs(match[0][1] - np_sigmoid(weights[match[1][1]]))
+            diff *= np.abs(match[0][1] - NpOps.sigmoid(weights[match[1][1]]))
             costs.append(diff)
         return tf.cast(np.mean(costs), tf.float32)
 
 
-def np_sigmoid(arr):
-    return 1 / (1 + np.exp(-arr))
+
 
 
 def scale(val, low, high, column=None):
