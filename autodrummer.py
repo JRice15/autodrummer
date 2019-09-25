@@ -34,7 +34,10 @@ class AutoDrummer(Analysis):
         # self.plot(self.peaks, plot_type="scatter", title="Filtered Peaks")
 
         # run modelling
-        self.run()
+        best_model = self.run()
+
+        self.plot_model(best_model)
+
 
 
     def format_peaks(self, peaks):
@@ -60,16 +63,15 @@ class AutoDrummer(Analysis):
         run tensorflow model
         """
         # define optimizer behavior
-        self.gradient_step = 0.01
-        self.num_models = 100
-        self.passes_per_model = 50
+        self.gradient_step = 0.005
+        self.num_models = 5
+        self.passes_per_model = 200
 
         # tf constants
         self.tf_peaks = self.format_peaks(self.peaks)
-        self.tf_rate = tf.constant(self.rate, dtype=tf.float32, name="sample_rate")
         self.tf_pi = tf.constant(np.pi, dtype=tf.float32, name="pi")
         beat_factors = tf.constant( 
-            # [beat, hb, qb]
+            # relative lengths of beats [beat, hb, qb]
             [1.0, 1/2, 1/4],
             dtype=tf.float32,
             name="beat_factors"
@@ -77,8 +79,10 @@ class AutoDrummer(Analysis):
 
         # tf variables
         bpm = tf.Variable(tf.random.uniform([1], 60, 180), dtype=tf.float32,  name='bpm')
-        offset_factor = tf.Variable(tf.random.uniform([1], 0, 1), dtype=tf.float32, name="offset_factor")
-        beat_wave_weights = tf.Variable(
+        offset_factor = self.tf_sigmoid(
+            tf.Variable(tf.random.uniform([1], -1, 1), dtype=tf.float32, name="offset_factor")
+        )
+        beat_wave_weights = self.tf_sigmoid(tf.Variable(
             [
                 # [beat, halfbeat, quarterbeat]
                 tf.random.uniform([1], 0.3, 0.7),
@@ -87,12 +91,12 @@ class AutoDrummer(Analysis):
             ],
             dtype=tf.float32,
             name="beat_weights"
-        )
+        ))
 
         # preparing variables
-        samples_per_beat = tf.math.round((1 / (bpm * 60) * self.rate), name="samples_per_beat")
-        beat_lengths = tf.math.round(beat_factors * samples_per_beat, name="beat_lengths")
-        offset_length = tf.math.round(samples_per_beat * offset_factor, name="offset_length")
+        samples_per_beat = tf.multiply(1 / bpm * 60, self.rate, name="samples_per_beat")
+        beat_lengths = tf.multiply(beat_factors, samples_per_beat, name="beat_lengths")
+        offset_length = tf.multiply(samples_per_beat, offset_factor, name="offset_length")
 
         # calculating cost
         cost = self.model_cost(beat_lengths, offset_length, beat_wave_weights)
@@ -102,7 +106,6 @@ class AutoDrummer(Analysis):
             self.gradient_step,
             name="optimizer"
         )
-        gradients = optimizer.compute_gradients(cost)
         optimization = optimizer.minimize(cost)
 
         # running
@@ -115,27 +118,43 @@ class AutoDrummer(Analysis):
             for m in range(self.num_models):
                 # reset variables
                 sess.run(init)
+                best_run = None
                 print("model {0}".format(m))
                 for p in range(self.passes_per_model):
                     sess.run(optimization)
-                    weights = sess.run(beat_wave_weights)
-                    print("  pass {0}, cost {1:.5f}, bpm {2:.5f}, offset_factor {3:.5f}, weights: {4:.5f} {5:.5f} {6:.5f}".format(
-                        p, sess.run(cost), sess.run(bpm)[0], sess.run(offset_factor)[0], weights[0][0], weights[1][0], weights[2][0]))
-                best_models.append({
-                    "cost": sess.run(cost),
-                    "bpm": sess.run(bpm)[0],
-                    "offset": sess.run(offset_factor)[0],
-                    "weights": sess.run(beat_wave_weights)
-                })
+                    run_cost = sess.run(cost)
+                    run_bpm = sess.run(bpm)[0]
+                    run_offset = sess.run(offset_factor)[0]
+                    run_weights = sess.run(beat_wave_weights)
+                    print("  pass {0:02d}, cost {1:.5f}, bpm {2:.5f}, offset_factor {3:.5f}, weights: {4:.5f} {5:.5f} {6:.5f}".format(
+                        p, run_cost, run_bpm, run_offset, run_weights[0][0], run_weights[1][0], run_weights[2][0]))
+                    if best_run is None or run_cost < best_run['cost']:
+                        best_run = {
+                            "cost": run_cost,
+                            "bpm": run_bpm,
+                            "offset": run_offset,
+                            "weights": run_weights
+                        }
+                best_models.append(best_run)
         print("")
+        very_best_model = {'cost': 10000}
         for i in best_models:
+            if i['cost'] < very_best_model['cost']:
+                very_best_model = i
             print("cost", i['cost'])
             print("    bpm", i['bpm'])
             print("    offset", i['offset'])
             print("    weights", i['weights'][0][0], i['weights'][1][0], i['weights'][2][0])
+        print("")
+        print("cost", very_best_model['cost'])
+        print("    bpm", very_best_model['bpm'])
+        print("    offset", very_best_model['offset'])
+        print("    weights", very_best_model['weights'][0][0], very_best_model['weights'][1][0], very_best_model['weights'][2][0])
+        return very_best_model
+        
 
-
-    # good sigmoid: 1 / 1 + 100exp(-10x)
+    def tf_sigmoid(self, val_or_arr):
+        return 1 / (1 + 80 * tf.math.exp(-8 * val_or_arr))
 
 
     def model_cost(self, beat_lengths, offset_length, beat_wave_weights):
@@ -187,6 +206,42 @@ class AutoDrummer(Analysis):
         )
         
         
+
+    def plot_model(self, model):
+        indexes = np.arange(self.start, self.end, self.frame_step)
+        beat_factors = np.array([1.0, 0.5, 0.25])
+
+        samples_per_beat = 1 / model['bpm'] * 60 * self.rate
+        beat_lengths = beat_factors * samples_per_beat
+        offset_length = samples_per_beat * model['offset']
+
+        wave_beat = self.wave_distribution_model(
+            indexes=indexes,
+            wavelength=beat_lengths[0],
+            peak_index=offset_length,
+            wave_weight=model['weights'][0],
+            name="whole_beat_wave"
+        )
+        wave_halfbeat = self.wave_distribution_model(
+            indexes=indexes,
+            wavelength=beat_lengths[1],
+            peak_index=offset_length,
+            wave_weight=model['weights'][1],
+            name="half_beat_wave"
+        )
+        wave_quarterbeat = self.wave_distribution_model(
+            indexes=indexes,
+            wavelength=beat_lengths[2],
+            peak_index=offset_length,
+            wave_weight=model['weights'][2],
+            name="qrtr_beat_wave"
+        )
+        full_cost_wave = wave_beat + wave_halfbeat + wave_quarterbeat
+        with tf.Session() as sess:
+            wave = sess.run(full_cost_wave)
+        plt.plot(indexes, wave)
+        plt.scatter(self.peaks[:,0], self.peaks[:,1])
+        plt.show()
 
 
     # def get_one_model(self, bpm, offset_factor):
