@@ -1,12 +1,11 @@
-jr rough punk song demo, 156
-jr riff 2, 100
-jr vu song, 88
-jr piano 2, 135
-jr guitar f, 125
-jr naked as we came, 74
-jr muddy hymnal, 106
-jr bar chords, 75
-bitterblue, 85
+jr_rough_punk_song_demo, 156
+jr_riff_2, 100
+jr_vu_song, 88
+jr_piano_2, 135
+jr_guitar_f, 125
+jr_naked_as_we_came, 74
+jr_muddy_hymnal, 106
+jr_barre_chords, 75
 cookegoodnews, 116
 slayer_angel_of_death, 212
 blitzkrieg_bop, 176
@@ -31,13 +30,15 @@ radiohead_nat_anthem, 91
 burial_ghost_hardware, 136
 talktalk_its_my_life, 126
 virgo_take_me_higher, 123
-low_lullaby, 126
-low_lullaby, 126
+low_lullaby__drums, 126
+low_lullaby__sparse, 126
 gambino_redbone, 80
 iron_wine_upward_over_mountain, 99
 new_order_silent_face, 117
 underworld_cowgirl, 127
-weezer_say_it_aint_so, 76
+weezer_say_it_aint_so__chorus, 76
+weezer_say_it_aint_so__verse, 76
+weezer_say_it_aint_so__verse_to_chorus, 76
 beyonce_love_on_top, 94
 dangelo_untitled_how_feel, 112
 muddy_waters_mannish_boy, 111

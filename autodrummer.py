@@ -19,6 +19,9 @@ from output_and_prompting import *
 
 
 class AutoDrummer(Analysis):
+    """
+    init with rec, configure optimizer if nescessary, then run()
+    """
 
     def __init__(self, rec):
         super().__init__(rec)
@@ -28,27 +31,35 @@ class AutoDrummer(Analysis):
         # get peaks from waveform
         frames = self.get_frames_mono()
         all_peaks = self.find_peaks(frames)
-        # self.plot(all_peaks, plot_type="scatter", title="All Peaks")
+        self.plot(all_peaks, plot_type="scatter", title="All Peaks")
 
         self.peaks = self.filter_peaks(all_peaks)
-        # self.plot(self.peaks, plot_type="scatter", title="Filtered Peaks")
+        self.plot(self.peaks, plot_type="scatter", title="Filtered Peaks")
 
-        # run modelling
-        best_model = self.run()
+        # define optimizer behavior
+        self.learning_rate = 0.001
+        self.num_models = 20
+        self.passes_per_model = 200
 
-        self.plot_model(best_model)
 
+    def configure(self, learning_rate, num_models, passes_per_model):
+        """
+        set learning rate, num_models, passes_per_model
+        """
+        self.learning_rate = learning_rate
+        self.num_models = num_models
+        self.passes_per_model = passes_per_model
 
 
     def format_peaks(self, peaks):
         # scale to 0-1 range
-        high = np.percentile(peaks[:,1], 80)
+        high = np.percentile(peaks[:,1], 93)
         peaks[:,1] = peaks[:,1] / high
         peaks[:,1][peaks[:,1] > 1] = 1
-        # self.plot(peaks, plot_type="scatter", title="Formatted Peaks")
+        self.plot(peaks, plot_type="scatter", title="Formatted Peaks")
 
         # make tensor
-        formatted_peaks = tf.convert_to_tensor(
+        formatted_peaks = tf.constant(
             peaks,
             dtype=tf.float32,
             name="tensor_peaks"
@@ -58,14 +69,10 @@ class AutoDrummer(Analysis):
         return formatted_peaks
 
 
-    def run(self):
+    def run(self, show_passes=True, plot_final=False, save_run=True):
         """
         run tensorflow model
         """
-        # define optimizer behavior
-        self.gradient_step = 0.005
-        self.num_models = 5
-        self.passes_per_model = 200
 
         # tf constants
         self.tf_peaks = self.format_peaks(self.peaks)
@@ -78,11 +85,11 @@ class AutoDrummer(Analysis):
         )
 
         # tf variables
-        bpm = tf.Variable(tf.random.uniform([1], 60, 180), dtype=tf.float32,  name='bpm')
-        offset_factor = self.tf_sigmoid(
-            tf.Variable(tf.random.uniform([1], -1, 1), dtype=tf.float32, name="offset_factor")
+        bpm_factor = self.tf_sigmoid(
+            tf.Variable(tf.random.uniform([1], 0, 1), dtype=tf.float32,  name='bpm')
         )
-        beat_wave_weights = self.tf_sigmoid(tf.Variable(
+        offset_factor = tf.Variable(tf.random.uniform([1], 0, 1), dtype=tf.float32, name="offset_factor")
+        beat_wave_weights = tf.Variable(
             [
                 # [beat, halfbeat, quarterbeat]
                 tf.random.uniform([1], 0.3, 0.7),
@@ -91,9 +98,10 @@ class AutoDrummer(Analysis):
             ],
             dtype=tf.float32,
             name="beat_weights"
-        ))
+        )
 
         # preparing variables
+        bpm = 120 * bpm_factor + 60
         samples_per_beat = tf.multiply(1 / bpm * 60, self.rate, name="samples_per_beat")
         beat_lengths = tf.multiply(beat_factors, samples_per_beat, name="beat_lengths")
         offset_length = tf.multiply(samples_per_beat, offset_factor, name="offset_length")
@@ -103,7 +111,7 @@ class AutoDrummer(Analysis):
 
         # optimizer
         optimizer = tf.train.GradientDescentOptimizer(
-            self.gradient_step,
+            self.learning_rate,
             name="optimizer"
         )
         optimization = optimizer.minimize(cost)
@@ -111,7 +119,11 @@ class AutoDrummer(Analysis):
         # running
         init = tf.global_variables_initializer()
         with tf.Session() as sess:
-            file_writer = tf.summary.FileWriter(dirname(os.path.abspath(__file__)) + "/tboard_logs", sess.graph)
+            if save_run:
+                file_writer = tf.summary.FileWriter(
+                    dirname(os.path.abspath(__file__)) + "/logs", 
+                    sess.graph
+                )
         
             best_models = []
             
@@ -119,42 +131,52 @@ class AutoDrummer(Analysis):
                 # reset variables
                 sess.run(init)
                 best_run = None
+
+                # initial variables
+                run_cost = sess.run(cost)
+                run_bpm = sess.run(bpm)[0]
+                run_offset = sess.run(offset_factor)[0]
+                run_weights = sess.run(beat_wave_weights)
                 print("model {0}".format(m))
+                initials = (-1, run_cost, run_bpm, run_offset, run_weights)
+
+                # run passes
                 for p in range(self.passes_per_model):
                     sess.run(optimization)
                     run_cost = sess.run(cost)
                     run_bpm = sess.run(bpm)[0]
                     run_offset = sess.run(offset_factor)[0]
                     run_weights = sess.run(beat_wave_weights)
-                    print("  pass {0:02d}, cost {1:.5f}, bpm {2:.5f}, offset_factor {3:.5f}, weights: {4:.5f} {5:.5f} {6:.5f}".format(
-                        p, run_cost, run_bpm, run_offset, run_weights[0][0], run_weights[1][0], run_weights[2][0]))
+                    if show_passes:
+                        self.display_pass(p, run_cost, run_bpm, run_offset, run_weights)
                     if best_run is None or run_cost < best_run['cost']:
                         best_run = {
                             "cost": run_cost,
                             "bpm": run_bpm,
                             "offset": run_offset,
-                            "weights": run_weights
+                            "weights": run_weights,
+                            "pass": p
                         }
                 best_models.append(best_run)
-        print("")
+                if show_passes:
+                    self.display_pass(*initials)
+
         very_best_model = {'cost': 10000}
         for i in best_models:
             if i['cost'] < very_best_model['cost']:
                 very_best_model = i
-            print("cost", i['cost'])
-            print("    bpm", i['bpm'])
-            print("    offset", i['offset'])
-            print("    weights", i['weights'][0][0], i['weights'][1][0], i['weights'][2][0])
-        print("")
-        print("cost", very_best_model['cost'])
-        print("    bpm", very_best_model['bpm'])
-        print("    offset", very_best_model['offset'])
-        print("    weights", very_best_model['weights'][0][0], very_best_model['weights'][1][0], very_best_model['weights'][2][0])
-        return very_best_model
-        
+            if show_passes:
+                self.display_model(i)
 
-    def tf_sigmoid(self, val_or_arr):
-        return 1 / (1 + 80 * tf.math.exp(-8 * val_or_arr))
+        print("")
+        self.display_model(very_best_model)
+        if plot_final:
+            self.plot_model(very_best_model)
+        return very_best_model
+
+
+    def tf_sigmoid(self, arr):
+        return 1 / (1 + 7.39 * tf.exp(-4 * arr))
 
 
     def model_cost(self, beat_lengths, offset_length, beat_wave_weights):
@@ -180,11 +202,16 @@ class AutoDrummer(Analysis):
             name="qrtr_beat_wave"
         )
         full_cost_wave = wave_beat + wave_halfbeat + wave_quarterbeat
-        return tf.reduce_sum(
-            tf.abs(
-                self.tf_peaks[:,1] - full_cost_wave
+        return tf.div(
+            tf.reduce_sum(
+                tf.abs(
+                    (self.tf_peaks[:,1] - full_cost_wave) * self.tf_peaks[:,1],
+                    name="abs_point_costs"
+                ),
+                name="total_cost"
             ),
-            name="cost"
+            self.sec_len,
+            name="cost_per_second"
         )
 
 
@@ -206,7 +233,7 @@ class AutoDrummer(Analysis):
         )
         
         
-
+    # representing
     def plot_model(self, model):
         indexes = np.arange(self.start, self.end, self.frame_step)
         beat_factors = np.array([1.0, 0.5, 0.25])
@@ -243,73 +270,32 @@ class AutoDrummer(Analysis):
         plt.scatter(self.peaks[:,0], self.peaks[:,1])
         plt.show()
 
-
-    # def get_one_model(self, bpm, offset_factor):
-    #     """
-    #     get one model using bpm and offset variables
-    #     """
-    #     samples_per_beat = int(1 / (bpm * 60) * self.rate)
-    #     offset = -int(samples_per_beat * offset_factor)
-    #     high_bound = int(max(self.peaks[:, 0]) + (2 * self.rate))
-
-    #     # fraction of one beat
-    #     # aka quarternote, sixteenthnote, eighthnote, sixteenthnote
-    #     fractions = [1.0, 1/4, 1/2, 1/4]
-    #     eighths = [int(i * self.rate / 4) for i in range(4)]
-
-    #     model_beats = []
-    #     for i in range(offset, high_bound, samples_per_beat):
-    #         for j in range(4):
-    #             # each model beats as [index, beat type]
-    #             model_beats.append([i + eighths[j], fractions[j]])
-
-    #     return np.asarray(model_beats)
-
-
-    # def model_cost(self, model, weights):
-    #     """
-    #     cost function for optimizing model
-    #     """
-    #     # match peaks to model beats, starting with highest peaks
-    #     peak_model_match = [] # [ [peak, model_match] ]
-    #     for peak in self.peaks:
-    #         diffs = (model[:,0] - peak[0])
-    #         min_ind = diffs.argmin()
-    #         model_match = model[min_ind]
-    #         model = np.reshape(np.delete(model, min_ind, 0), (-1, 2))
-    #         peak_model_match.append(np.asarray([peak, model_match]))
-
-    #     costs = []
-    #     for match in peak_model_match:
-    #         # difference between sample indexes
-    #         diff = np.abs(match[0][0] - match[0][1])
-    #         # amplitude times difference between scaled peak and beat weight
-    #         diff *= np.abs(match[0][1] - NpOps.sigmoid(weights[match[1][1]]))
-    #         costs.append(diff)
-    #     return tf.cast(np.mean(costs), tf.float32)
-
-
-
-
-
-
-class TrainAutodrummer():
-
-
-    def __init__(self):
-        pass
-
-    def get_training_data(self):
+    def display_pass(self, p, cost, bpm, offset, weights):
         """
-        read training_data.csv.
-        returns [ [filename, bpm], ... ]
+        representation for one pass of the optimizer
         """
-        with open(dirname(__file__) + "/training_data.csv", "r") as f:
-            data = [
-                [j.strip() for j in i.split(",")][:2] for i in f.readlines()
-                if i != "\n"
-            ]
-        return data
+        print("  pass {0:04d}, cost {1:.5f}, bpm {2:.5f}, offset_factor {3:.5f}, weights: {4:.5f} {5:.5f} {6:.5f}".format(
+            p, cost, bpm, offset, weights[0][0], weights[1][0], weights[2][0]))
+
+    def display_model(self, model):
+        """
+        representation for one model created by optimizer
+        """
+        print("cost", model['cost'], "pass", model['pass'])
+        print("    bpm", model['bpm'])
+        print("    offset", model['offset'])
+        print("    weights", model['weights'][0][0], model['weights'][1][0], model['weights'][2][0])
+
+
+
+    def play_bpm(self, bpm):
+        samples_per_beat = 60 / bpm * self.rate
+        arr = np.zeros((int(samples_per_beat * 4), 2))
+        for i in range(4):
+            arr[int(i * samples_per_beat)] = 1
+        Recording(arr, name="bpmtest").playback(0)
+
+
 
 
 
@@ -333,8 +319,12 @@ def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
 
 
 def autodrummer_main():
-    a = Recording(source=relativism_dir + '/sources/gtr_test_1.wav', name='test')
-    AutoDrummer(a)
+    a = Recording(source='training_sources/beyonce_love_on_top.wav', name='test')
+    drummer = AutoDrummer(a)
+    drummer.configure(0.001, 100, 100)
+    model = drummer.run(True, True)
+    a.playback()
+    drummer.play_bpm(model['bpm'])
 
 
 
