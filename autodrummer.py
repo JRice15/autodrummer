@@ -5,16 +5,17 @@ import os
 import random as rd
 
 from os.path import dirname
+
 global relativism_dir
-relativism_dir = dirname(dirname(os.path.abspath(__file__)))
+relativism_dir = dirname(dirname(dirname(os.path.abspath(__file__))))
 sys.path.append(relativism_dir)
 
 
-from analysis import *
-from recording_obj import Recording
-from sampler import *
-from input_processing import *
-from output_and_prompting import *
+from src.analysis import *
+from src.recording_obj import Recording
+from src.sampler import *
+from src.input_processing import *
+from src.output_and_prompting import *
 
 
 
@@ -30,25 +31,33 @@ class AutoDrummer(Analysis):
 
         # get peaks from waveform
         frames = self.get_frames_mono()
+        # self.plot(frames, title="Frames")
         all_peaks = self.find_peaks(frames)
-        self.plot(all_peaks, plot_type="scatter", title="All Peaks")
+        # self.plot(all_peaks, plot_type="scatter", title="All Peaks")
 
         self.peaks = self.filter_peaks(all_peaks)
-        self.plot(self.peaks, plot_type="scatter", title="Filtered Peaks")
+        # self.plot(self.peaks, plot_type="scatter", title="Filtered Peaks")
 
         # define optimizer behavior
         self.learning_rate = 0.001
         self.num_models = 20
         self.passes_per_model = 200
+        self.base_peak_level = -0.0002 # higher negative value penalizes missed peaks more. careful changing much
 
 
-    def configure(self, learning_rate, num_models, passes_per_model):
+    def configure(self, learning_rate=None, num_models=None, passes_per_model=None, 
+            base_peak_level=None):
         """
-        set learning rate, num_models, passes_per_model
+        learning rate, num_models, passes_per_model, base_peak_level
         """
-        self.learning_rate = learning_rate
-        self.num_models = num_models
-        self.passes_per_model = passes_per_model
+        if learning_rate is not None:
+            self.learning_rate = learning_rate
+        if num_models is not None:
+            self.num_models = num_models
+        if passes_per_model is not None:
+            self.passes_per_model = passes_per_model
+        if base_peak_level is not None:
+            self.base_peak_level = base_peak_level
 
 
     def format_peaks(self, peaks):
@@ -56,7 +65,16 @@ class AutoDrummer(Analysis):
         high = np.percentile(peaks[:,1], 93)
         peaks[:,1] = peaks[:,1] / high
         peaks[:,1][peaks[:,1] > 1] = 1
-        self.plot(peaks, plot_type="scatter", title="Formatted Peaks")
+
+        high = NpOps.column_max(peaks, 0)
+        low = NpOps.column_min(peaks, 0)
+        base_vals = np.empty((int((high - low)/self.frame_step)))
+        base_vals.fill(self.base_peak_level)
+        base_inds = np.arange(low, high, self.frame_step)
+        base_peaks = NpOps.join_channels(base_inds, base_vals)
+        peaks = NpOps.set_indexes(base_peaks, peaks)
+
+        # self.plot(peaks, plot_type="scatter", title="Formatted Peaks")
 
         # make tensor
         formatted_peaks = tf.constant(
@@ -202,7 +220,7 @@ class AutoDrummer(Analysis):
             name="qrtr_beat_wave"
         )
         full_cost_wave = wave_beat + wave_halfbeat + wave_quarterbeat
-        return tf.div(
+        return tf.math.divide(
             tf.reduce_sum(
                 tf.abs(
                     (self.tf_peaks[:,1] - full_cost_wave) * self.tf_peaks[:,1],
@@ -225,7 +243,7 @@ class AutoDrummer(Analysis):
             wave_weight,
             tf.math.pow(
                 tf.math.cos( 
-                    (indexes - peak_index) * 2 * self.tf_pi / wavelength
+                    (indexes - peak_index) * self.tf_pi / wavelength
                 ),
                 16
             ),
@@ -319,12 +337,11 @@ def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
 
 
 def autodrummer_main():
-    a = Recording(source='training_sources/beyonce_love_on_top.wav', name='test')
+    a = Recording(source='training_sources/bpm_83.wav', name='test')
     drummer = AutoDrummer(a)
-    drummer.configure(0.001, 100, 100)
     model = drummer.run(True, True)
-    a.playback()
-    drummer.play_bpm(model['bpm'])
+    # a.playback()
+    # drummer.play_bpm(model['bpm'])
 
 
 
