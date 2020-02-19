@@ -10,15 +10,12 @@ sys.path.append(relativism_dir)
 
 # from src_compithon import *
 from src.data_types import *
-from src.object_data import *
-from src.analysis import *
+from src.analysis import Analysis
 from src.recording_obj import Recording
-from src.sampler import *
-from src.input_processing import *
-from src.output_and_prompting import *
-from src.relativism import *
-
-
+from src.input_processing import inpt, inpt_validate
+from src.output_and_prompting import info_block
+from src.utility import *
+from src.path import Path
 
 class AutoDrummer(Analysis):
     """
@@ -119,6 +116,8 @@ class AutoDrummer(Analysis):
             name="beat_weights"
         )
 
+        var_list = (bpm_factor, offset_factor, beat_wave_weights)
+
         # preparing variables
         bpm = 120 * bpm_factor + 60
         samples_per_beat = tf.multiply(1 / bpm * 60, self.rate, name="samples_per_beat")
@@ -129,11 +128,11 @@ class AutoDrummer(Analysis):
         cost = self.model_cost(beat_lengths, offset_length, beat_wave_weights)
 
         # optimizer
-        optimizer = tf.train.GradientDescentOptimizer(
-            self.learning_rate,
+        optimizer = tf.keras.optimizers.SGD(
+            learning_rate=self.learning_rate,
             name="optimizer"
         )
-        optimization = optimizer.minimize(cost)
+        optimization = optimizer.minimize(cost, var_list=var_list)
 
         # running
         init = tf.global_variables_initializer()

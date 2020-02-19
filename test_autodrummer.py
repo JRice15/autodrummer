@@ -26,15 +26,16 @@ class TestAutodrummer():
             rec = Recording(
                 mode="file",
                 file=Path(directory='training_sources/', name=filename, ext=".wav"),
-                name=filename
+                name=filename,
+                path=Path(directory="out")
             )
 
             drummer = AutoDrummer(rec)
             drummer.configure(
                 learning_rate=learning_rate,
                 num_models=int(num_models),
-                passes_per_model=int(passes_per_model,
-                base_peak_level=base_peak_level)
+                passes_per_model=int(passes_per_model),
+                base_peak_level=base_peak_level
             )
             model = drummer.run(True, False, False)
 
