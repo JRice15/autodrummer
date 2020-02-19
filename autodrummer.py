@@ -2,20 +2,21 @@ import sys
 import numpy as np
 import tensorflow as tf
 import os
+from os.path import dirname
 import random as rd
 
-from os.path import dirname
-
-global relativism_dir
 relativism_dir = dirname(dirname(dirname(os.path.abspath(__file__))))
 sys.path.append(relativism_dir)
 
-
+# from src_compithon import *
+from src.data_types import *
+from src.object_data import *
 from src.analysis import *
 from src.recording_obj import Recording
 from src.sampler import *
 from src.input_processing import *
 from src.output_and_prompting import *
+from src.relativism import *
 
 
 
@@ -318,10 +319,6 @@ class AutoDrummer(Analysis):
 
 
 
-
-
-
-
 def super_sort(the_list, ind=None, ind2=None, high_to_low=False):
     """
     list, index1, index2, reverse.
@@ -347,32 +344,5 @@ def autodrummer_main():
 
 
 
-
-
-
-
-def autodrummer_help():
-    print("\n*** AutoDrummer Help ***\n")
-    print("Usage:\n")
-    print("  Standard/Manual Entry: 'python3 autodrummer.py', then follow instructions\n")
-    print("  Command Line Flags Entry: \n")
-    print("    mode: m=[arg] / mode=[arg]")
-    print("        args: 'f' - analyze file, 'r' - record\n")
-    print("    playback: p= / playback=[arg]")
-    print("        args: y/n - whether to play back file after recording/reading\n")
-    print("    file: f= / filename=[arg], only used in file mode")
-    print("        args: full name of sound file to analyze, which cannot contain spaces (only .wav files are accepted)\n")
-    print("    recording duration: d= / duration=[arg], only used in record mode")
-    print("        args: integer - recording time in seconds\n")
-    print("    device: d= / device=[arg], used only in record mode")
-    print("        args: integer - index of device to record from (run with no flags to get list of devices by index\n")
-    print("Notes & Warnings:")
-    print("  * AutoDrummer will not work well for selections with tempos below 60 bpm\n")
-    sys.exit()
-
-
 if __name__ == "__main__":
-    if ("-h" in sys.argv) or ("-H" in sys.argv) or ("--help" in sys.argv) or ("help" in sys.argv):
-        autodrummer_help()
-    else:
-        autodrummer_main()
+    autodrummer_main()

@@ -1,22 +1,31 @@
-from autodrummer import *
 import re
 import time
 import gc
 import random as rd
+
+from autodrummer import *
+
 
 class TestAutodrummer():
     """
     test autodrummer for a set with known bpms
     """
 
-    def __init__(self, learning_rate=0.001, passes_per_model=10, num_models=5):
-        print(learning_rate, passes_per_model, num_models)
+    def __init__(self, 
+            learning_rate=0.001, 
+            passes_per_model=10, 
+            num_models=5,
+            base_peak_level=-0.02
+        ):
+
+        print(learning_rate, passes_per_model, num_models, base_peak_level)
         training_data = self.get_training_data()
         processed_data = []
         for d in training_data:
             filename = re.sub(r" ", "", d[0])
             rec = Recording(
-                source='training_sources/' + filename + ".wav",
+                mode="file",
+                file=Path(directory='training_sources/', name=filename, ext=".wav"),
                 name=filename
             )
 
@@ -24,7 +33,8 @@ class TestAutodrummer():
             drummer.configure(
                 learning_rate=learning_rate,
                 num_models=int(num_models),
-                passes_per_model=int(passes_per_model)
+                passes_per_model=int(passes_per_model,
+                base_peak_level=base_peak_level)
             )
             model = drummer.run(True, False, False)
 
@@ -115,6 +125,7 @@ class MetaTestAutodrummer():
         # f = open('outdata.tsv', 'w')
         # f.close()
         for i in range(10):
+
             song = training_data[rd.randint(0, len(training_data))]
             filename = re.sub(r" ", "", song[0])
             rec = Recording(
@@ -124,6 +135,7 @@ class MetaTestAutodrummer():
 
             drummer = AutoDrummer(rec)
             for p in passes:
+
                 drummer.configure(
                     num_models=num_models,
                     passes_per_model=p
